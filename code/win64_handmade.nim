@@ -1,4 +1,4 @@
-import windows
+import windows, xinput
 
 type
     Win32OffscreenBuffer = tuple
@@ -51,7 +51,7 @@ proc win32ResizeBackBuffer(buffer: var Win32OffscreenBuffer, width: int32, heigh
     buffer.memory = VirtualAlloc(nil, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE)
     buffer.pitch = buffer.width * bytesPerPixel
 
-proc win32DisplayBufferInWindow(deviceContext: HDC, windowWidth: int32, windowHeight: int32, buffer: Win32OffscreenBuffer) =
+proc win32DisplayBufferInWindow(buffer: Win32OffscreenBuffer, deviceContext: HDC, windowWidth: int32, windowHeight: int32) =
     var info = buffer.info;
     discard StretchDIBits(deviceContext,
         0'i32, 0'i32, windowWidth, windowHeight,
@@ -64,11 +64,18 @@ proc mainWindowCallback(window: HWND, message: WINUINT, wparam: WPARAM, lparam: 
     of WM_DESTROY: globalRunning = false
     of WM_CLOSE: globalRunning = false
     of WM_ACTIVATEAPP: OutputDebugStringA("WM_ACTIVATEAPP\n")
+    of WM_SYSKEYUP, WM_SYSKEYDOWN, WM_KEYUP, WM_KEYDOWN:
+        var wasDown = (lparam and (1 shl 30)) != 0
+        var isDown = (lparam and (1 shl 31)) == 0
+        var vkCode = wparam
+        if (isDown != wasDown):
+            if (vkCode == ord('W')):
+                discard
     of WM_PAINT:
         var paint: PAINTSTRUCT
         var deviceContext = BeginPaint(window, paint)
         var dimension = win32GetWindowDimension(window)
-        win32DisplayBufferInWindow(deviceContext, dimension.width, dimension.height, globalBackBuffer)
+        win32DisplayBufferInWindow(globalBackBuffer, deviceContext, dimension.width, dimension.height)
         discard EndPaint(window, paint)
     else: result = DefWindowProcA(window, message, wparam, lparam)
 
@@ -91,10 +98,37 @@ if RegisterClassA(windowClass) != 0 :
                     globalRunning = false
                 discard TranslateMessage(message)
                 discard DispatchMessageA(message)
+
+            # TODO(casey): Should we poll this more frequently
+            for controllerIndex in 0..XUSER_MAX_COUNT-1:
+                var controllerState: XINPUT_STATE
+                if (XInputGetState(DWORD(controllerIndex), controllerState) == ERROR_SUCCESS):
+                    var pad = controllerState.Gamepad
+                    #var up = (pad.wButtons and XINPUT_GAMEPAD_DPAD_UP) != 0
+                    #var down = (pad.wButtons and XINPUT_GAMEPAD_DPAD_DOWN) != 0
+                    #var left = (pad.wButtons and XINPUT_GAMEPAD_DPAD_LEFT) != 0
+                    #var right = (pad.wButtons and XINPUT_GAMEPAD_DPAD_RIGHT) != 0
+                    #var start = (pad.wButtons and XINPUT_GAMEPAD_START) != 0
+                    #var back = (pad.wButtons and XINPUT_GAMEPAD_BACK) != 0
+                    #var leftShoulder = (pad.wButtons and XINPUT_GAMEPAD_LEFT_SHOULDER) != 0
+                    #var rightShoulder = (pad.wButtons and XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0
+                    #var aButton = (pad.wButtons and XINPUT_GAMEPAD_A) != 0
+                    #var bButton = (pad.wButtons and XINPUT_GAMEPAD_B) != 0
+                    #var xButton = (pad.wButtons and XINPUT_GAMEPAD_X) != 0
+                    #var yButton = (pad.wButtons and XINPUT_GAMEPAD_Y) != 0
+
+                    var stickX = pad.sThumbLX
+                    var stickY = pad.sThumbLY
+
+                    var xinputVibration = XINPUT_VIBRATION(wLeftMotorSpeed: cast[WORD](60000), wRightMotorSpeed: cast[WORD](60000))
+                    discard XInputSetState(0, xinputVibration)
+
+                    inc(xOffset, stickX shr 12)
+                    inc(yOffset, sticky shr 12)
+
             renderWeirdGradient(globalBackBuffer, xOffset, yOffset)
-            inc(xOffset)
             let dimension = win32GetWindowDimension(window);
-            win32DisplayBufferInWindow(deviceContext, dimension.width, dimension.height, globalBackBuffer)
+            win32DisplayBufferInWindow(globalBackBuffer, deviceContext, dimension.width, dimension.height)
     else:
         #TODO: Logging
         discard
